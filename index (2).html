@@ -3,28 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Title for the PWA and browser tab -->
     <title>Flashcard Web App</title>
-    <!-- Load Tailwind CSS -->
+
+    <!-- CRITICAL FIX: Placeholder variables to prevent Firebase errors on GitHub Pages. 
+         These allow the app to run without a real database setup. -->
     <script>
-    // Placeholder variables to prevent Firebase errors on GitHub Pages
-    const __app_id = 'github-pages-test-app';
-    const __firebase_config = '{}';
-    const __initial_auth_token = '';
-</script>
+        const __app_id = 'github-pages-test-app';
+        const __firebase_config = '{}';
+        const __initial_auth_token = '';
+    </script>
 
+    <!-- Load Tailwind CSS for styling and responsiveness -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- PWA MANIFEST LINK (NEW LINE 1) -->
-    <link rel="manifest" href="/flashcard_manifest.json">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1f2937; /* Dark background */
+            color: #f3f4f6; /* Light text */
+            -webkit-tap-highlight-color: transparent; /* Remove tap highlights on mobile */
+        }
+        .card-shadow {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+        }
+        .flashcard-front {
+            transform: rotateY(0deg);
+        }
+        .flashcard-back {
+            /* Ensures the back is initially hidden and correctly oriented for the flip */
+            transform: rotateY(180deg); 
+        }
+        .card-container {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        
+        /* FIX: Target the card-container when it *itself* has the flip-card class */
+        .card-container.flip-card {
+            transform: rotateY(180deg);
+        }
+        
+        .flashcard-front, .flashcard-back {
+            backface-visibility: hidden;
+        }
+        .focus-ring-white:focus {
+            outline: 2px solid white;
+            outline-offset: 2px;
+        }
+    </style>
 
-    <!-- PWA SERVICE WORKER REGISTRATION (NEW CODE BLOCK) -->
+    <!-- PWA MANIFEST LINK -->
+    <link rel="manifest" href="./flashcard_manifest.json">
+
+    <!-- PWA SERVICE WORKER REGISTRATION -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                // Note: The path depends on your hosting setup. Using root '/' for GitHub Pages.
-                navigator.serviceWorker.register('/flashcard_service_worker.js')
+                // Note: The path depends on your deployment structure.
+                navigator.serviceWorker.register('./flashcard_service_worker.js')
                     .then(registration => {
-                        console.log('Service Worker registered:', registration.scope);
+                        console.log('Service Worker registered successfully:', registration);
                     })
                     .catch(error => {
                         console.error('Service Worker registration failed:', error);
@@ -32,636 +72,651 @@
             });
         }
     </script>
-    <!-- Load Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, updateDoc, arrayUnion, arrayRemove, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+</head>
+<body class="p-4 min-h-screen">
+    <div id="app" class="max-w-xl mx-auto">
+        <!-- Main Application Header -->
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-extrabold text-blue-400">Flashcard Pro</h1>
+            <p class="text-gray-400 text-sm">Offline PWA for Learning</p>
+        </header>
 
-        // --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        <!-- Main Content Area -->
+        <div id="content">
+            <!-- Loading and Error State -->
+            <div id="loading" class="text-center p-8">
+                <p class="text-blue-300">Loading App Data...</p>
+                <div class="mt-4 w-8 h-8 border-4 border-blue-500 border-t-transparent border-solid rounded-full animate-spin mx-auto"></div>
+            </div>
+
+            <!-- Custom Message Box/Modal -->
+            <div id="message-box-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center p-4">
+                <div class="bg-gray-800 p-6 rounded-xl card-shadow max-w-sm w-full">
+                    <h3 id="message-box-title" class="text-xl font-bold mb-3 text-blue-400"></h3>
+                    <p id="message-box-body" class="text-gray-300 mb-6"></p>
+                    <button id="message-box-confirm" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition">OK</button>
+                    <button id="message-box-cancel" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition hidden">Cancel</button>
+                </div>
+            </div>
+
+            <!-- View Containers -->
+            <div id="folder-list-view" class="view"></div>
+            <div id="card-list-view" class="view hidden"></div>
+            <div id="card-practice-view" class="view hidden"></div>
+            <div id="card-edit-view" class="view hidden"></div>
+        </div>
+    </div>
+
+    <!-- JavaScript logic -->
+    <script>
+        // DOM Elements
+        const app = document.getElementById('app');
+        const contentDiv = document.getElementById('content');
+        const loadingDiv = document.getElementById('loading');
+        const folderListView = document.getElementById('folder-list-view');
+        const cardListView = document.getElementById('card-list-view');
+        const cardPracticeView = document.getElementById('card-practice-view');
+        const cardEditView = document.getElementById('card-edit-view');
+
+        // Message Box Elements
+        const messageBoxModal = document.getElementById('message-box-modal');
+        const messageBoxTitle = document.getElementById('message-box-title');
+        const messageBoxBody = document.getElementById('message-box-body');
+        const messageBoxConfirm = document.getElementById('message-box-confirm');
+        const messageBoxCancel = document.getElementById('message-box-cancel');
+
+        // Global State Variables
+        let currentView = 'folder-list';
+        let folders = [];
+        let cards = {}; // {folderId: [card1, card2, ...]}
+        let selectedFolderId = null;
+        let selectedCardIndex = 0;
         
-        // --- Global State and Service Instances ---
-        let app, db, auth;
-        let userId = null;
-        let folders = []; // Stores {id, name, cards: []}
-        let state = {
-            screen: 'folders', // 'folders', 'qa_create', 'qa_list', 'practice'
-            currentFolderId: null,
-            currentCardIndex: 0
-        };
+        // Storage Keys
+        const FOLDERS_KEY = 'flashcard_folders';
+        const CARDS_KEY = 'flashcard_cards';
 
-        // --- Firebase Initialization and Authentication ---
-        async function initializeFirebase() {
-            if (!firebaseConfig) {
-                console.error("Firebase config not found.");
-                document.getElementById('app').innerHTML = `<div class="p-8 text-center text-red-500">Firebase configuration missing.</div>`;
-                return;
-            }
+        /**
+         * Custom Promise-based Message Box (replaces alert/confirm)
+         * @param {string} title - The title of the box.
+         * @param {string} body - The main message body.
+         * @param {boolean} isConfirmation - If true, shows a Cancel button.
+         * @returns {Promise<boolean>} - Resolves true for Confirm/OK, false for Cancel.
+         */
+        function showMessageBox(title, body, isConfirmation = false) {
+            return new Promise(resolve => {
+                messageBoxTitle.textContent = title;
+                messageBoxBody.textContent = body;
+                messageBoxCancel.classList.toggle('hidden', !isConfirmation);
 
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
+                const handleConfirm = () => {
+                    messageBoxModal.classList.add('hidden');
+                    messageBoxConfirm.removeEventListener('click', handleConfirm);
+                    messageBoxCancel.removeEventListener('click', handleCancel);
+                    resolve(true);
+                };
 
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
+                const handleCancel = () => {
+                    messageBoxModal.classList.add('hidden');
+                    messageBoxConfirm.removeEventListener('click', handleConfirm);
+                    messageBoxCancel.removeEventListener('click', handleCancel);
+                    resolve(false);
+                };
+
+                messageBoxConfirm.addEventListener('click', handleConfirm);
+                if (isConfirmation) {
+                    messageBoxCancel.addEventListener('click', handleCancel);
                 }
 
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Authenticated as:", userId);
-                        setupFolderListener();
-                    } else {
-                        console.log("No user signed in.");
-                        userId = 'anonymous'; // Fallback for anonymous or unauth state
-                    }
-                    renderApp(); // Initial render after auth
-                });
-            } catch (error) {
-                console.error("Firebase init/auth error:", error);
-                document.getElementById('app').innerHTML = `<div class="p-8 text-center text-red-500">Authentication Error: Check console.</div>`;
-            }
-        }
-
-        // --- Firestore Listeners ---
-
-        function getFoldersCollectionRef() {
-            if (!userId) return null;
-            return collection(db, `artifacts/${appId}/users/${userId}/folders`);
-        }
-
-        function setupFolderListener() {
-            const foldersRef = getFoldersCollectionRef();
-            if (!foldersRef) return;
-            
-            // Real-time listener for folders
-            onSnapshot(foldersRef, (snapshot) => {
-                folders = snapshot.docs.map(doc => {
-                    const data = doc.data();
-                    // Deserialize the cards array from the JSON string
-                    let cardList = [];
-                    try {
-                        cardList = JSON.parse(data.cards || '[]');
-                    } catch (e) {
-                        console.error("Failed to parse cards JSON:", e);
-                    }
-                    return {
-                        id: doc.id,
-                        name: data.name,
-                        cards: cardList
-                    };
-                });
-                folders.sort((a, b) => a.name.localeCompare(b.name));
-                renderApp();
-            }, (error) => {
-                console.error("Firestore listen error:", error);
+                messageBoxModal.classList.remove('hidden');
             });
         }
 
-        // --- Navigation and State Management ---
-
-        function navigate(screen, folderId = null) {
-            state.screen = screen;
-            if (folderId !== null) {
-                state.currentFolderId = folderId;
-                state.currentCardIndex = 0; // Reset index when changing folders
-            }
-            renderApp();
-        }
-
-        // --- Helper Functions ---
-
-        function getFolderById(id) {
-            return folders.find(f => f.id === id);
-        }
-        
-        function getFolderByName(name) {
-            return folders.find(f => f.name === name);
-        }
+        // --- Utility Functions ---
 
         function generateUniqueId() {
-             return 'f' + Date.now().toString(36) + Math.random().toString(36).substr(2);
+            return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
         }
-
-        function showToast(message, isError = false) {
-            const toast = document.getElementById('toast');
-            toast.textContent = message;
-            toast.classList.remove('hidden', 'bg-red-600', 'bg-green-600');
-            toast.classList.add(isError ? 'bg-red-600' : 'bg-green-600', 'opacity-100');
-            setTimeout(() => {
-                toast.classList.remove('opacity-100');
-                toast.classList.add('hidden');
-            }, isError ? 3000 : 1500);
-        }
-
-        // --- Firestore CRUD Operations ---
-
-        async function createOrRenameFolder(oldId, newName) {
-            if (!userId) return showToast("Authentication not ready.", true);
-            
-            newName = newName.trim();
-            if (!newName) return showToast("Folder name cannot be empty.", true);
-
-            const existingFolder = getFolderByName(newName);
-            if (existingFolder && existingFolder.id !== oldId) {
-                return showToast(`Folder '${newName}' already exists.`, true);
+        
+        // Data Handling - Using localStorage as fallback for GitHub Pages
+        const storage = {
+            async get(key) {
+                try {
+                    const data = localStorage.getItem(key);
+                    return data ? JSON.parse(data) : null;
+                } catch (e) {
+                    console.error("Error reading from localStorage:", e);
+                    return null;
+                }
+            },
+            async set(key, value) {
+                try {
+                    localStorage.setItem(key, JSON.stringify(value));
+                } catch (e) {
+                    console.error("Error writing to localStorage:", e);
+                }
             }
+        };
 
-            let folderRef;
-            const existingFolderData = getFolderById(oldId);
-            const cardsJson = existingFolderData ? JSON.stringify(existingFolderData.cards) : '[]';
 
-            if (oldId && existingFolderData) {
-                // Rename scenario
-                folderRef = doc(db, `artifacts/${appId}/users/${userId}/folders`, oldId);
-                await updateDoc(folderRef, { name: newName });
-                showToast(`Folder renamed to '${newName}'.`);
-            } else {
-                // Create new scenario
-                const newId = generateUniqueId();
-                folderRef = doc(db, `artifacts/${appId}/users/${userId}/folders`, newId);
-                await setDoc(folderRef, { name: newName, cards: cardsJson });
-                showToast(`Folder '${newName}' created.`);
+        async function loadData() {
+            try {
+                // Initialize global state from storage
+                folders = (await storage.get(FOLDERS_KEY)) || [];
+                cards = (await storage.get(CARDS_KEY)) || {};
+                console.log("Data loaded.", {folders, cards});
+            } catch (error) {
+                console.error("Failed to load initial data:", error);
+                showMessageBox("Data Load Error", "Could not load data from storage. Starting fresh.");
             }
         }
 
-        async function saveCard(folderId, question, answer) {
-            if (!userId) return showToast("Authentication not ready.", true);
-            question = question.trim();
-            answer = answer.trim();
-
-            if (!question || !answer) {
-                return showToast("Please enter both Question and Answer.", true);
+        async function saveData() {
+            try {
+                await storage.set(FOLDERS_KEY, folders);
+                await storage.set(CARDS_KEY, cards);
+            } catch (error) {
+                console.error("Failed to save data:", error);
+                showMessageBox("Data Save Error", "Could not save data to storage.");
             }
-
-            const folder = getFolderById(folderId);
-            if (!folder) return showToast("Folder not found.", true);
-
-            const newCard = { question, answer };
-            folder.cards.push(newCard); // Update the local array
-            
-            // Serialize and save the entire array back to Firestore
-            const folderRef = doc(db, `artifacts/${appId}/users/${userId}/folders`, folderId);
-            await updateDoc(folderRef, { cards: JSON.stringify(folder.cards) });
-            
-            showToast("Flashcard saved successfully!");
-            // Clear inputs is handled by the calling function
         }
 
-        async function deleteCard(folderId, index) {
-            if (!userId) return showToast("Authentication not ready.", true);
-            const folder = getFolderById(folderId);
-            if (!folder) return showToast("Folder not found.", true);
+        // --- View Navigation ---
 
-            folder.cards.splice(index, 1); // Remove from local array
-            
-            // Serialize and save the modified array back to Firestore
-            const folderRef = doc(db, `artifacts/${appId}/users/${userId}/folders`, folderId);
-            await updateDoc(folderRef, { cards: JSON.stringify(folder.cards) });
-            
-            showToast("Card deleted.");
-            navigate('qa_list', folderId); // Re-render the list
-        }
+        function setView(viewName) {
+            folderListView.classList.add('hidden');
+            cardListView.classList.add('hidden');
+            cardPracticeView.classList.add('hidden');
+            cardEditView.classList.add('hidden');
 
-        async function deleteFolder(folderId) {
-            if (!userId) return showToast("Authentication not ready.", true);
-            const folderRef = doc(db, `artifacts/${appId}/users/${userId}/folders`, folderId);
-            await deleteDoc(folderRef);
-            showToast("Folder deleted.");
-            navigate('folders');
-        }
-
-
-        // --- UI Components / Rendering Functions ---
-
-        function renderApp() {
-            const appDiv = document.getElementById('app');
-            appDiv.innerHTML = '';
-
-            if (userId === null) {
-                 appDiv.innerHTML = '<div class="flex items-center justify-center h-full"><div class="text-xl text-white">Loading App...</div></div>';
-                 return;
-            }
-
-            let content;
-            switch (state.screen) {
-                case 'folders':
-                    content = renderFolderScreen();
+            switch (viewName) {
+                case 'folder-list':
+                    folderListView.classList.remove('hidden');
+                    renderFolderList();
                     break;
-                case 'qa_create':
-                    content = renderQACreateScreen();
-                    break;
-                case 'qa_list':
-                    content = renderQAListScreen();
+                case 'card-list':
+                    cardListView.classList.remove('hidden');
+                    renderCardList();
                     break;
                 case 'practice':
-                    content = renderPracticeScreen();
+                    cardPracticeView.classList.remove('hidden');
+                    renderCardPractice();
+                    break;
+                case 'edit':
+                    cardEditView.classList.remove('hidden');
+                    renderCardEdit();
                     break;
                 default:
-                    content = renderFolderScreen();
+                    console.error("Unknown view:", viewName);
             }
-            appDiv.appendChild(content);
+            currentView = viewName;
         }
-        
-        // --- Modals (Popups) ---
 
-        function renderRenameModal(folder) {
-            const isNew = !folder;
-            const oldName = folder ? folder.name : '';
-            const oldId = folder ? folder.id : null;
+        // --- Folder List View (Home Screen) ---
+
+        function createFolderItem(folder) {
+            const cardCount = (cards[folder.id] || []).length;
             
-            const modal = document.createElement('div');
-            modal.id = 'modal';
-            modal.className = 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50';
+            const folderDiv = document.createElement('div');
+            folderDiv.className = 'flex justify-between items-center bg-gray-800 p-4 rounded-xl mb-3 card-shadow cursor-pointer transition transform hover:scale-[1.01]';
             
-            modal.innerHTML = `
-                <div class="bg-gray-800 p-6 rounded-lg shadow-2xl w-11/12 max-w-sm border border-gray-700">
-                    <h3 class="text-xl font-bold text-white mb-4">${isNew ? 'New Folder Name' : `Rename Folder: "${oldName}"`}</h3>
-                    <input id="renameInput" type="text" value="${oldName}" placeholder="Enter new folder name"
-                           class="w-full p-3 mb-4 bg-gray-900 text-white rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-green-500">
-                    <div class="flex justify-end space-x-3">
-                        ${!isNew ? `<button id="deleteBtn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold transition">Delete</button>` : ''}
-                        <button id="cancelBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition">Cancel</button>
-                        <button id="saveBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition">${isNew ? 'Create' : 'Rename'}</button>
-                    </div>
-                </div>
+            const textDiv = document.createElement('div');
+            textDiv.className = 'flex-grow min-w-0';
+            textDiv.innerHTML = `
+                <h2 class="text-lg font-semibold text-white truncate">${folder.name}</h2>
+                <p class="text-sm text-gray-400">${cardCount} ${cardCount === 1 ? 'Card' : 'Cards'}</p>
             `;
-            
-            document.body.appendChild(modal);
-            const inputEl = document.getElementById('renameInput');
-            inputEl.focus();
-
-            const closeModal = () => document.body.removeChild(modal);
-            document.getElementById('cancelBtn').onclick = closeModal;
-            document.getElementById('saveBtn').onclick = async () => {
-                await createOrRenameFolder(oldId, inputEl.value);
-                closeModal();
+            textDiv.onclick = () => {
+                selectedFolderId = folder.id;
+                setView('card-list');
             };
-
-            if (!isNew) {
-                document.getElementById('deleteBtn').onclick = async () => {
-                    if (confirm("Are you sure you want to delete this folder and all its cards?")) {
-                         await deleteFolder(oldId);
-                         closeModal();
-                    }
-                };
-            }
-        }
-        
-        function renderConfirmDeleteCardModal(folderId, index, question) {
-            const modal = document.createElement('div');
-            modal.id = 'modal';
-            modal.className = 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50';
             
-            modal.innerHTML = `
-                <div class="bg-gray-800 p-6 rounded-lg shadow-2xl w-11/12 max-w-sm border border-gray-700">
-                    <h3 class="text-xl font-bold text-red-400 mb-2">Confirm Deletion</h3>
-                    <p class="text-gray-300 mb-4">Are you sure you want to delete this card?</p>
-                    <p class="text-sm text-gray-400 italic mb-6 truncate">Q: ${question}</p>
-                    <div class="flex justify-end space-x-3">
-                        <button id="cancelBtn" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition">Cancel</button>
-                        <button id="deleteBtn" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-semibold transition">Delete</button>
-                    </div>
-                </div>
+            const buttonContainer = document.createElement('div');
+            buttonContainer.className = 'flex space-x-2 ml-4 flex-shrink-0';
+            
+            // Edit Button
+            const editBtn = document.createElement('button');
+            editBtn.className = 'p-2 rounded-full text-blue-400 hover:bg-gray-700 transition focus-ring-white';
+            editBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
             `;
-            
-            document.body.appendChild(modal);
-
-            const closeModal = () => document.body.removeChild(modal);
-            document.getElementById('cancelBtn').onclick = closeModal;
-            document.getElementById('deleteBtn').onclick = async () => {
-                await deleteCard(folderId, index);
-                closeModal();
-            };
-        }
-
-
-        // --- FolderScreen ---
-
-        function renderFolderScreen() {
-            const folderEl = document.createElement('div');
-            folderEl.className = 'p-5 flex flex-col h-full space-y-4';
-            
-            const header = `<h1 class="text-3xl font-extrabold text-white pb-3 border-b border-gray-700">Flashcard Folders 🗂️</h1>`;
-            
-            const listItems = folders.map(f => `
-                <button data-id="${f.id}" data-name="${f.name}" 
-                        class="folder-btn w-full p-4 bg-gray-700 text-left text-xl text-white rounded-lg shadow-md hover:bg-gray-600 transition duration-150 active:scale-[0.98] transform">
-                    ${f.name} <span class="text-sm text-gray-400">(${f.cards.length} cards)</span>
-                </button>
-            `).join('');
-
-            folderEl.innerHTML = `
-                ${header}
-                <div class="flex-grow overflow-y-auto space-y-3">
-                    ${listItems || '<p class="text-center text-gray-400 pt-10">No folders yet! Click '+' below to create one.</p>'}
-                </div>
-                <div class="flex justify-end h-16">
-                    <button id="addFolderBtn" class="w-16 h-16 bg-green-600 text-white text-4xl rounded-full shadow-lg hover:bg-green-700 transition duration-150 active:scale-[0.9] transform">+</button>
-                </div>
-            `;
-            
-            // Event listeners
-            folderEl.querySelector('#addFolderBtn').onclick = () => renderRenameModal(null);
-            
-            folderEl.querySelectorAll('.folder-btn').forEach(btn => {
-                const folderId = btn.dataset.id;
+            editBtn.onclick = async (e) => {
+                e.stopPropagation();
                 
-                // Click to open
-                btn.onclick = () => navigate('qa_create', folderId);
+                // Prompting for new name using a custom prompt/alert since prompt() is banned
+                const newName = await new Promise(resolve => {
+                    messageBoxTitle.textContent = 'Edit Folder Name';
+                    messageBoxBody.innerHTML = `
+                        <p class="text-gray-300 mb-2">Enter a new name for the folder:</p>
+                        <input id="prompt-input" type="text" value="${folder.name}" class="w-full p-2 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500" />
+                    `;
+                    messageBoxCancel.classList.remove('hidden');
+
+                    const handleConfirm = () => {
+                        const input = document.getElementById('prompt-input').value.trim();
+                        messageBoxModal.classList.add('hidden');
+                        messageBoxConfirm.removeEventListener('click', handleConfirm);
+                        messageBoxCancel.removeEventListener('click', handleCancel);
+                        resolve(input);
+                    };
+
+                    const handleCancel = () => {
+                        messageBoxModal.classList.add('hidden');
+                        messageBoxConfirm.removeEventListener('click', handleConfirm);
+                        messageBoxCancel.removeEventListener('click', handleCancel);
+                        resolve(null);
+                    };
+
+                    messageBoxConfirm.textContent = 'Confirm';
+                    messageBoxCancel.textContent = 'Cancel';
+                    messageBoxConfirm.addEventListener('click', handleConfirm);
+                    messageBoxCancel.addEventListener('click', handleCancel);
+                    messageBoxModal.classList.remove('hidden');
+                });
                 
-                // Long press for rename/delete (using touch/mouse events)
-                let pressTimer;
-                
-                const startPress = () => {
-                    pressTimer = setTimeout(() => {
-                        renderRenameModal(getFolderById(folderId));
-                        pressTimer = null; // Clear timer flag after executing
-                    }, 700);
-                };
-
-                const cancelPress = () => {
-                    if (pressTimer) {
-                        clearTimeout(pressTimer);
-                        pressTimer = null;
-                    }
-                };
-
-                btn.addEventListener('mousedown', startPress);
-                btn.addEventListener('mouseup', cancelPress);
-                btn.addEventListener('mouseleave', cancelPress);
-                btn.addEventListener('touchstart', startPress, { passive: true });
-                btn.addEventListener('touchend', cancelPress);
-            });
-
-            return folderEl;
-        }
-
-        // --- QACreateScreen ---
-
-        function renderQACreateScreen() {
-            const folder = getFolderById(state.currentFolderId);
-            if (!folder) {
-                navigate('folders');
-                return document.createElement('div');
-            }
-
-            const createEl = document.createElement('div');
-            createEl.className = 'p-5 flex flex-col h-full space-y-4';
-
-            createEl.innerHTML = `
-                <div class="flex justify-between items-center h-14 pb-2 border-b border-gray-700">
-                    <h1 class="text-2xl font-bold text-white truncate">${folder.name}</h1>
-                    <button id="backBtn" class="px-4 py-1 bg-gray-600 text-white text-lg rounded-lg hover:bg-gray-700 transition">Back</button>
-                </div>
-                
-                <textarea id="questionInput" placeholder="Question (Type or Paste)"
-                          class="flex-grow p-4 bg-gray-900 text-white text-xl rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                          style="min-height: 35%"></textarea>
-                
-                <textarea id="answerInput" placeholder="Answer"
-                          class="flex-grow p-4 bg-gray-900 text-white text-xl rounded-lg border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                          style="min-height: 35%"></textarea>
-
-                <div class="flex justify-between space-x-3 h-16">
-                    <button id="saveBtn" class="flex-1 px-4 py-2 bg-green-600 text-white text-lg font-semibold rounded-lg hover:bg-green-700 transition">💾 Save Card</button>
-                    <button id="viewBtn" class="flex-1 px-4 py-2 bg-blue-600 text-white text-lg font-semibold rounded-lg hover:bg-blue-700 transition">📋 View All Cards</button>
-                    <button id="practiceBtn" class="flex-1 px-4 py-2 bg-purple-600 text-white text-lg font-semibold rounded-lg hover:bg-purple-700 transition">🧠 Practice</button>
-                </div>
-            `;
-
-            // Event listeners
-            createEl.querySelector('#backBtn').onclick = () => navigate('folders');
-            createEl.querySelector('#viewBtn').onclick = () => navigate('qa_list', folder.id);
-            createEl.querySelector('#practiceBtn').onclick = () => {
-                if (folder.cards.length > 0) {
-                    navigate('practice', folder.id);
-                } else {
-                    showToast("No cards in this folder to practice.", true);
+                if (newName && newName.length > 0) {
+                    folder.name = newName;
+                    await saveData();
+                    renderFolderList();
+                } else if (newName !== null) {
+                    // User confirmed but entered nothing.
+                    showMessageBox("Name Required", "Folder name cannot be empty.");
                 }
             };
             
-            createEl.querySelector('#saveBtn').onclick = async () => {
-                const q = document.getElementById('questionInput').value;
-                const a = document.getElementById('answerInput').value;
-                await saveCard(folder.id, q, a);
-                // Clear inputs after save
-                document.getElementById('questionInput').value = '';
-                document.getElementById('answerInput').value = '';
+            // Delete Button
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'p-2 rounded-full text-red-400 hover:bg-gray-700 transition focus-ring-white';
+            deleteBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+            `;
+            deleteBtn.onclick = async (e) => {
+                e.stopPropagation();
+                const confirmed = await showMessageBox('Confirm Delete', `Are you sure you want to delete the folder "${folder.name}" and all ${cardCount} cards?`, true);
+                if (confirmed) {
+                    folders = folders.filter(f => f.id !== folder.id);
+                    delete cards[folder.id];
+                    await saveData();
+                    renderFolderList();
+                }
             };
 
-            return createEl;
+            buttonContainer.appendChild(editBtn);
+            buttonContainer.appendChild(deleteBtn);
+            
+            folderDiv.appendChild(textDiv);
+            folderDiv.appendChild(buttonContainer);
+            
+            return folderDiv;
         }
 
-        // --- QAListScreen ---
-
-        function renderQAListScreen() {
-            const folder = getFolderById(state.currentFolderId);
-            if (!folder) {
-                navigate('folders');
-                return document.createElement('div');
-            }
-            
-            const listEl = document.createElement('div');
-            listEl.className = 'p-5 flex flex-col h-full space-y-4';
-
-            const header = `
-                <div class="flex justify-between items-center h-14 pb-2 border-b border-gray-700">
-                    <h1 class="text-2xl font-bold text-white truncate">${folder.name} List</h1>
-                    <button id="backBtn" class="px-4 py-1 bg-gray-600 text-white text-lg rounded-lg hover:bg-gray-700 transition">Back</button>
+        function renderFolderList() {
+            folderListView.innerHTML = `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold mb-3 text-white">Your Folders</h2>
+                    <div id="folder-container"></div>
+                    <p id="no-folders-msg" class="text-center text-gray-500 mt-8 hidden">
+                        No folders yet. Tap the button below to create your first one!
+                    </p>
                 </div>
-            `;
-            
-            const listItems = folder.cards.map((card, index) => `
-                <button data-index="${index}" class="card-list-btn w-full p-3 bg-gray-700 text-left text-white text-base rounded-lg shadow-md hover:bg-gray-600 transition duration-150 truncate">
-                    Q${index + 1}: ${card.question}
+                <button id="add-folder-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
+                    + Create New Folder
                 </button>
-            `).join('');
-
-
-            listEl.innerHTML = `
-                ${header}
-                <div class="flex-grow overflow-y-auto space-y-2">
-                    ${listItems || '<p class="text-center text-gray-400 pt-10">No cards saved yet!</p>'}
-                </div>
             `;
-            
-            listEl.querySelector('#backBtn').onclick = () => navigate('qa_create', folder.id);
 
-            listEl.querySelectorAll('.card-list-btn').forEach(btn => {
-                // Long press for delete
-                let pressTimer;
-                const index = parseInt(btn.dataset.index);
-                const question = folder.cards[index].question;
+            const folderContainer = document.getElementById('folder-container');
+            const noFoldersMsg = document.getElementById('no-folders-msg');
 
-                const startPress = () => {
-                    pressTimer = setTimeout(() => {
-                        renderConfirmDeleteCardModal(folder.id, index, question);
-                        pressTimer = null;
-                    }, 700);
-                };
-
-                const cancelPress = () => {
-                    if (pressTimer) {
-                        clearTimeout(pressTimer);
-                        pressTimer = null;
-                    }
-                };
-                
-                btn.addEventListener('mousedown', startPress);
-                btn.addEventListener('mouseup', cancelPress);
-                btn.addEventListener('mouseleave', cancelPress);
-                btn.addEventListener('touchstart', startPress, { passive: true });
-                btn.addEventListener('touchend', cancelPress);
-            });
-
-
-            return listEl;
-        }
-
-        // --- PracticeScreen ---
-
-        function renderPracticeScreen() {
-            const folder = getFolderById(state.currentFolderId);
-            if (!folder || folder.cards.length === 0) {
-                navigate('qa_create', state.currentFolderId);
-                return document.createElement('div');
+            if (folders.length === 0) {
+                noFoldersMsg.classList.remove('hidden');
+            } else {
+                folders.forEach(folder => {
+                    folderContainer.appendChild(createFolderItem(folder));
+                });
             }
 
-            const totalCards = folder.cards.length;
-            const card = folder.cards[state.currentCardIndex];
-            const isQuestion = state.currentCardIndex % 2 === 0; // Simple way to track Q/A state for rendering
-            
-            const practiceEl = document.createElement('div');
-            practiceEl.className = 'p-5 flex flex-col h-full space-y-4';
+            document.getElementById('add-folder-btn').onclick = async () => {
+                // Prompting for new name using a custom prompt/alert since prompt() is banned
+                const folderName = await new Promise(resolve => {
+                    messageBoxTitle.textContent = 'New Folder';
+                    messageBoxBody.innerHTML = `
+                        <p class="text-gray-300 mb-2">Enter a name for your new folder:</p>
+                        <input id="prompt-input" type="text" placeholder="Folder Name" class="w-full p-2 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500" />
+                    `;
+                    messageBoxCancel.classList.remove('hidden');
+                    
+                    const handleConfirm = () => {
+                        const input = document.getElementById('prompt-input').value.trim();
+                        messageBoxModal.classList.add('hidden');
+                        messageBoxConfirm.removeEventListener('click', handleConfirm);
+                        messageBoxCancel.removeEventListener('click', handleCancel);
+                        resolve(input);
+                    };
 
-            practiceEl.innerHTML = `
-                <div class="flex justify-between items-center h-14 pb-2 border-b border-gray-700">
-                    <h1 class="text-3xl font-bold text-white">${state.currentCardIndex + 1}/${totalCards}</h1>
-                    <button id="backBtn" class="px-4 py-1 bg-gray-600 text-white text-lg rounded-lg hover:bg-gray-700 transition">Back</button>
-                </div>
+                    const handleCancel = () => {
+                        messageBoxModal.classList.add('hidden');
+                        messageBoxConfirm.removeEventListener('click', handleConfirm);
+                        messageBoxCancel.removeEventListener('click', handleCancel);
+                        resolve(null);
+                    };
+
+                    messageBoxConfirm.textContent = 'Confirm';
+                    messageBoxCancel.textContent = 'Cancel';
+                    messageBoxConfirm.addEventListener('click', handleConfirm);
+                    messageBoxCancel.addEventListener('click', handleCancel);
+                    messageBoxModal.classList.remove('hidden');
+                });
                 
-                <!-- Card Container for Flip/Swipe -->
-                <div id="cardContainer" class="flex-grow relative overflow-hidden">
-                    <button id="flashcard" class="absolute inset-0 bg-gray-900 text-white text-center rounded-2xl shadow-xl p-8 cursor-pointer active:shadow-inner transition duration-150 transform active:scale-[0.99] flex items-center justify-center">
-                        <p id="cardText" class="text-3xl font-extrabold max-w-full leading-snug">${isQuestion ? card.question : card.answer}</p>
+                if (folderName && folderName.length > 0) {
+                    const newFolder = { id: generateUniqueId(), name: folderName };
+                    folders.push(newFolder);
+                    cards[newFolder.id] = [];
+                    await saveData();
+                    renderFolderList();
+                } else if (folderName !== null) {
+                    // User confirmed but entered nothing.
+                    showMessageBox("Name Required", "Folder name cannot be empty.");
+                }
+            };
+        }
+        
+        // --- Card List View ---
+
+        function createCardListItem(card, index) {
+            const li = document.createElement('li');
+            li.className = 'flex justify-between items-center bg-gray-700 p-3 rounded-lg mb-2 card-shadow';
+            li.innerHTML = `
+                <span class="text-white text-base truncate flex-grow">${index + 1}. ${card.question}</span>
+                <div class="flex space-x-2 ml-4 flex-shrink-0">
+                    <button data-action="edit" class="p-1 rounded-full text-yellow-300 hover:bg-gray-600 transition focus-ring-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
+                    </button>
+                    <button data-action="delete" class="p-1 rounded-full text-red-400 hover:bg-gray-600 transition focus-ring-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
                     </button>
                 </div>
             `;
 
-            practiceEl.querySelector('#backBtn').onclick = () => navigate('qa_create', folder.id);
-
-            const cardButton = practiceEl.querySelector('#flashcard');
-            const cardContainer = practiceEl.querySelector('#cardContainer');
-            
-            // --- Flip Logic ---
-            let isFlipped = false;
-            cardButton.onclick = () => {
-                const cardTextEl = document.getElementById('cardText');
-                
-                // Animate out (Y-axis flip effect)
-                cardButton.style.transition = 'transform 0.15s ease-in';
-                cardButton.style.transform = 'scaleY(0)';
-
-                setTimeout(() => {
-                    isFlipped = !isFlipped;
-                    cardTextEl.textContent = isFlipped ? card.answer : card.question;
-                    
-                    // Animate in
-                    cardButton.style.transition = 'transform 0.15s ease-out';
-                    cardButton.style.transform = 'scaleY(1)';
-                }, 150);
+            li.querySelector('[data-action="edit"]').onclick = () => {
+                selectedCardIndex = index;
+                setView('edit');
             };
 
-            // --- Swipe Logic ---
-            let touchStartX = 0;
-            const SWIPE_THRESHOLD = 50;
+            li.querySelector('[data-action="delete"]').onclick = async () => {
+                const confirmed = await showMessageBox('Confirm Delete', 'Are you sure you want to delete this card?', true);
+                if (confirmed) {
+                    cards[selectedFolderId].splice(index, 1);
+                    await saveData();
+                    renderCardList();
+                }
+            };
+            
+            return li;
+        }
 
-            const changeCard = (direction) => {
-                isFlipped = false;
-                let newIndex = state.currentCardIndex + direction;
+        function renderCardList() {
+            const folder = folders.find(f => f.id === selectedFolderId);
+            const folderCards = cards[selectedFolderId] || [];
+            const cardCount = folderCards.length;
+            
+            if (!folder) {
+                return setView('folder-list');
+            }
+
+            cardListView.innerHTML = `
+                <button id="back-to-folders" class="mb-4 text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Back to Folders
+                </button>
+                <h2 class="text-3xl font-extrabold text-white mb-2 truncate">${folder.name}</h2>
+                <p class="text-gray-400 mb-6">${cardCount} ${cardCount === 1 ? 'Card' : 'Cards'}</p>
+
+                <div class="flex space-x-4 mb-6">
+                    <button id="add-card-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
+                        + Add Card
+                    </button>
+                    <button id="practice-btn" ${cardCount === 0 ? 'disabled' : ''} class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
+                        Start Practice
+                    </button>
+                </div>
                 
-                if (newIndex < 0) {
-                    newIndex = totalCards - 1;
-                } else if (newIndex >= totalCards) {
-                    newIndex = 0;
+                <ul id="card-list" class="space-y-2">
+                    <!-- Card items go here -->
+                </ul>
+                <p id="no-cards-msg" class="text-center text-gray-500 mt-8 hidden">
+                    No cards in this folder yet.
+                </p>
+            `;
+
+            document.getElementById('back-to-folders').onclick = () => setView('folder-list');
+            document.getElementById('add-card-btn').onclick = () => {
+                selectedCardIndex = -1; // -1 indicates a new card
+                setView('edit');
+            };
+            document.getElementById('practice-btn').onclick = () => {
+                if (cardCount > 0) {
+                    selectedCardIndex = 0;
+                    setView('practice');
+                }
+            };
+
+            const cardListUl = document.getElementById('card-list');
+            const noCardsMsg = document.getElementById('no-cards-msg');
+
+            if (cardCount === 0) {
+                noCardsMsg.classList.remove('hidden');
+            } else {
+                folderCards.forEach((card, index) => {
+                    cardListUl.appendChild(createCardListItem(card, index));
+                });
+            }
+        }
+
+        // --- Card Edit View ---
+
+        function renderCardEdit() {
+            const folderCards = cards[selectedFolderId] || [];
+            const isNewCard = selectedCardIndex === -1;
+            let card = isNewCard ? { question: '', answer: '' } : folderCards[selectedCardIndex];
+
+            const title = isNewCard ? 'Add New Card' : 'Edit Card';
+
+            cardEditView.innerHTML = `
+                <button id="back-to-cards" class="mb-4 text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                    Back to Card List
+                </button>
+
+                <h2 class="text-3xl font-extrabold text-white mb-6">${title}</h2>
+
+                <form id="card-edit-form" class="space-y-6">
+                    <div>
+                        <label for="question" class="block text-sm font-medium text-gray-400 mb-1">Question</label>
+                        <textarea id="question" rows="4" class="w-full p-3 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500 resize-none card-shadow" required>${card.question}</textarea>
+                    </div>
+                    <div>
+                        <label for="answer" class="block text-sm font-medium text-gray-400 mb-1">Answer</label>
+                        <textarea id="answer" rows="4" class="w-full p-3 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500 resize-none card-shadow" required>${card.answer}</textarea>
+                    </div>
+                    
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
+                        ${isNewCard ? 'Save Card' : 'Update Card'}
+                    </button>
+                </form>
+            `;
+
+            document.getElementById('back-to-cards').onclick = () => setView('card-list');
+            
+            document.getElementById('card-edit-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const question = document.getElementById('question').value.trim();
+                const answer = document.getElementById('answer').value.trim();
+
+                if (!question || !answer) {
+                    return showMessageBox("Missing Content", "Both the Question and Answer fields are required.");
+                }
+
+                if (isNewCard) {
+                    cards[selectedFolderId].push({ question, answer });
+                    showMessageBox("Success", "Card saved successfully!");
+                } else {
+                    folderCards[selectedCardIndex] = { question, answer };
+                    showMessageBox("Success", "Card updated successfully!");
                 }
                 
-                state.currentCardIndex = newIndex;
-                renderApp();
+                await saveData();
+                setView('card-list');
+            };
+        }
+
+        // --- Card Practice View ---
+
+        function renderCardPractice() {
+            const folderCards = cards[selectedFolderId] || [];
+            
+            if (folderCards.length === 0) {
+                return setView('card-list');
+            }
+
+            const currentCard = folderCards[selectedCardIndex];
+            const totalCards = folderCards.length;
+            
+            cardPracticeView.innerHTML = `
+                <div class="flex justify-between items-center mb-6">
+                    <button id="back-to-cards" class="text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                        Exit Practice
+                    </button>
+                    <span id="card-counter" class="text-lg font-bold text-yellow-400">${selectedCardIndex + 1} / ${totalCards}</span>
+                </div>
+
+                <!-- Flashcard Display -->
+                <!-- Removed inline ontouchstart to standardize event handling -->
+                <div id="flashcard" class="h-96 perspective [perspective:1000px] mb-8">
+                    <div id="card-container" class="card-container relative w-full h-full">
+                        <!-- Card Front (Question) -->
+                        <div id="card-front" class="flashcard-front absolute w-full h-full bg-gray-800 rounded-2xl card-shadow p-6 flex flex-col items-center justify-center text-center cursor-pointer transition transform hover:scale-[1.01] focus-ring-white">
+                            <p class="text-sm text-gray-400 mb-2 font-medium">QUESTION</p>
+                            <div class="text-2xl font-extrabold text-white overflow-y-auto max-h-full">${currentCard.question}</div>
+                        </div>
+                        <!-- Card Back (Answer) -->
+                        <div id="card-back" class="flashcard-back absolute w-full h-full bg-blue-800 rounded-2xl card-shadow p-6 flex flex-col items-center justify-center text-center cursor-pointer transition transform hover:scale-[1.01] focus-ring-white">
+                            <p class="text-sm text-blue-300 mb-2 font-medium">ANSWER</p>
+                            <div class="text-2xl font-extrabold text-white overflow-y-auto max-h-full">${currentCard.answer}</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Practice Controls -->
+                <div class="flex justify-between space-x-4">
+                    <button id="prev-card-btn" ${selectedCardIndex === 0 ? 'disabled' : ''} class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+                    </button>
+                    <button id="flip-card-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
+                        Flip
+                    </button>
+                    <button id="next-card-btn" ${selectedCardIndex === totalCards - 1 ? 'disabled' : ''} class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                    </button>
+                </div>
+
+                <div class="mt-4 text-center text-gray-500 text-sm">Tap the card or use the Flip button</div>
+            `;
+
+            const cardContainer = document.getElementById('card-container');
+            const flashcardDiv = document.getElementById('flashcard');
+
+            // Toggle card flip on tap
+            const flipCard = () => {
+                // This toggles the 'flip-card' class on the container, which the CSS now correctly targets.
+                cardContainer.classList.toggle('flip-card');
             };
 
-            cardContainer.addEventListener('touchstart', (e) => {
-                touchStartX = e.touches[0].clientX;
-            });
+            document.getElementById('flip-card-btn').onclick = flipCard;
+            cardContainer.onclick = flipCard;
 
-            cardContainer.addEventListener('touchend', (e) => {
-                const touchEndX = e.changedTouches[0].clientX;
-                const diff = touchStartX - touchEndX; // positive for left swipe (Next), negative for right swipe (Prev)
-                
-                if (Math.abs(diff) > SWIPE_THRESHOLD) {
-                    if (diff > 0) {
-                        changeCard(1); // Swipe left (Next)
-                    } else {
-                        changeCard(-1); // Swipe right (Previous)
+            // Navigation
+            document.getElementById('back-to-cards').onclick = () => setView('card-list');
+            
+            document.getElementById('prev-card-btn').onclick = () => {
+                selectedCardIndex = Math.max(0, selectedCardIndex - 1);
+                renderCardPractice();
+            };
+
+            document.getElementById('next-card-btn').onclick = () => {
+                selectedCardIndex = Math.min(totalCards - 1, selectedCardIndex + 1);
+                renderCardPractice();
+            };
+
+            // Mobile Swipe/Touch Controls (for easier mobile use)
+            let touchstartX = 0;
+            let touchendX = 0;
+
+            const checkDirection = () => {
+                // If it's a small movement (a tap), don't navigate
+                if (Math.abs(touchendX - touchstartX) < 50) {
+                    return;
+                }
+
+                if (touchendX < touchstartX) { // Swipe Left (Next Card)
+                    if (selectedCardIndex < totalCards - 1) {
+                        selectedCardIndex++;
+                        renderCardPractice();
+                    }
+                } else if (touchendX > touchstartX) { // Swipe Right (Previous Card)
+                    if (selectedCardIndex > 0) {
+                        selectedCardIndex--;
+                        renderCardPractice();
                     }
                 }
+            };
+            
+            flashcardDiv.addEventListener('touchstart', e => {
+                touchstartX = e.changedTouches[0].screenX;
             });
 
-            // Ensure text is centered on initial render (Kivy update_card_text_size equivalent)
-            const cardTextEl = practiceEl.querySelector('#cardText');
-            cardTextEl.className = 'text-3xl font-extrabold max-w-[90%] leading-snug break-words'; // Limit width for centering/wrapping
+            flashcardDiv.addEventListener('touchend', e => {
+                touchendX = e.changedTouches[0].screenX;
+                checkDirection();
+            });
 
-            return practiceEl;
         }
 
 
-        // --- Main Execution ---
+        // --- Initialization ---
 
-        window.onload = initializeFirebase;
+        async function initApp() {
+            try {
+                // Show loading screen
+                loadingDiv.classList.remove('hidden');
+                
+                // 1. Load data from storage
+                await loadData();
+
+                // 2. Hide loading screen and show the default view
+                loadingDiv.classList.add('hidden');
+                setView('folder-list');
+
+            } catch (error) {
+                console.error("App initialization failed:", error);
+                loadingDiv.innerHTML = `<p class="text-red-500">Failed to initialize app. See console for details.</p>`;
+            }
+        }
+
+        // Start the application when the window loads
+        window.onload = initApp;
 
     </script>
-    
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            height: 100vh;
-            background-color: #1f2937; /* Dark background */
-        }
-        #app {
-            height: 100vh;
-            width: 100vw;
-            max-width: 600px; /* Max width for mobile-centric app */
-            margin: 0 auto;
-            background-color: #1f2937; /* Gray-800 equivalent */
-        }
-        /* Style for the card text content */
-        #cardText {
-             /* Use max-width for wrapping/centering like Kivy's text_size logic */
-             max-width: 90%; 
-        }
-    </style>
-</head>
-<body class="bg-gray-900">
-    <!-- Main Application Container -->
-    <div id="app">
-        <div class="flex items-center justify-center h-full">
-            <div class="text-xl text-white">Loading App...</div>
-        </div>
-    </div>
-
-    <!-- Toast Notification Area -->
-    <div id="toast" class="fixed bottom-5 right-5 p-3 rounded-lg text-white font-semibold shadow-lg transition-opacity duration-300 hidden opacity-0 z-50">
-        Message
-    </div>
 </body>
 </html>
-
 

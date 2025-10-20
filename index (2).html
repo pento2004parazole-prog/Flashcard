@@ -1,722 +1,767 @@
-<!DOCTYPE html>
+         <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <!-- Title for the PWA and browser tab -->
-    <title>Flashcard Web App</title>
-
-    <!-- CRITICAL FIX: Placeholder variables to prevent Firebase errors on GitHub Pages. 
-         These allow the app to run without a real database setup. -->
-    <script>
-        const __app_id = 'github-pages-test-app';
-        const __firebase_config = '{}';
-        const __initial_auth_token = '';
-    </script>
-
-    <!-- Load Tailwind CSS for styling and responsiveness -->
+    <title>Flashcard Deck Manager</title>
+    <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #1f2937; /* Dark background */
-            color: #f3f4f6; /* Light text */
-            -webkit-tap-highlight-color: transparent; /* Remove tap highlights on mobile */
-        }
-        .card-shadow {
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
-        }
-        .flashcard-front {
-            transform: rotateY(0deg);
-        }
-        .flashcard-back {
-            /* Ensures the back is initially hidden and correctly oriented for the flip */
-            transform: rotateY(180deg); 
-        }
+        /* Define the core 3D flip properties for stability */
         .card-container {
+            perspective: 1000px;
+            height: 24rem; 
+            width: 100%;
+            max-width: 28rem;
+            margin: 0 auto;
+        }
+        .card-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
             transition: transform 0.6s;
             transform-style: preserve-3d;
         }
-        
-        /* FIX: Target the card-container when it *itself* has the flip-card class */
-        .card-container.flip-card {
+        .is-flipped .card-inner {
             transform: rotateY(180deg);
         }
-        
-        .flashcard-front, .flashcard-back {
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            -webkit-backface-visibility: hidden; 
             backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            cursor: pointer;
         }
-        .focus-ring-white:focus {
-            outline: 2px solid white;
-            outline-offset: 2px;
+        .card-face-back {
+            transform: rotateY(180deg);
+            background-color: #4f46e5; /* Indigo-600 */
+            color: white;
+        }
+        .card-face-front {
+            background-color: white;
+            color: #1f2937; /* Gray-800 */
+            border: 1px solid #e5e7eb;
+        }
+
+        /* State for long press visual feedback */
+        .long-press-target:active {
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.5); /* Indigo ring effect */
+            transition: box-shadow 0.1s ease-out;
         }
     </style>
-
-    <!-- PWA MANIFEST LINK -->
-    <link rel="manifest" href="./flashcard_manifest.json">
-
-    <!-- PWA SERVICE WORKER REGISTRATION -->
-    <script>
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                // Note: The path depends on your deployment structure.
-                navigator.serviceWorker.register('./flashcard_service_worker.js')
-                    .then(registration => {
-                        console.log('Service Worker registered successfully:', registration);
-                    })
-                    .catch(error => {
-                        console.error('Service Worker registration failed:', error);
-                    });
-            });
-        }
-    </script>
 </head>
-<body class="p-4 min-h-screen">
-    <div id="app" class="max-w-xl mx-auto">
-        <!-- Main Application Header -->
-        <header class="text-center mb-6">
-            <h1 class="text-3xl font-extrabold text-blue-400">Flashcard Pro</h1>
-            <p class="text-gray-400 text-sm">Offline PWA for Learning</p>
-        </header>
+<body class="bg-gray-50 flex flex-col items-center min-h-screen p-4 font-sans">
 
-        <!-- Main Content Area -->
-        <div id="content">
-            <!-- Loading and Error State -->
-            <div id="loading" class="text-center p-8">
-                <p class="text-blue-300">Loading App Data...</p>
-                <div class="mt-4 w-8 h-8 border-4 border-blue-500 border-t-transparent border-solid rounded-full animate-spin mx-auto"></div>
-            </div>
+    <h1 class="text-3xl font-extrabold text-gray-900 mt-8 mb-4">Flashcard Manager</h1>
 
-            <!-- Custom Message Box/Modal -->
-            <div id="message-box-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 z-50 flex items-center justify-center p-4">
-                <div class="bg-gray-800 p-6 rounded-xl card-shadow max-w-sm w-full">
-                    <h3 id="message-box-title" class="text-xl font-bold mb-3 text-blue-400"></h3>
-                    <p id="message-box-body" class="text-gray-300 mb-6"></p>
-                    <button id="message-box-confirm" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition">OK</button>
-                    <button id="message-box-cancel" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg transition hidden">Cancel</button>
+    <!-- --- DECK LIST VIEW --- -->
+    <div id="deck-list-view" class="w-full max-w-xl p-4">
+        
+        <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-bold text-gray-800">Your Folders</h2>
+            <button onclick="showCreateDeckModal()" class="flex items-center space-x-2 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 transition transform active:scale-95">
+                <i data-lucide="folder-plus" class="w-5 h-5"></i>
+                <span>Create New Folder</span>
+            </button>
+        </div>
+        
+        <div id="deck-list-container" class="space-y-4">
+            <!-- Decks will be rendered here -->
+            <p id="deck-loading-status" class="text-gray-500 text-center py-8">Loading your decks...</p>
+        </div>
+
+    </div>
+
+    <!-- --- CARD VIEWER VIEW --- -->
+    <div id="card-viewer-view" class="w-full max-w-xl p-4 hidden">
+        
+        <div class="flex justify-between items-center mb-6">
+            <button onclick="handleBackToDecks()" class="flex items-center space-x-1 text-indigo-600 hover:text-indigo-800 transition">
+                <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                <span class="font-medium">Back to Folders</span>
+            </button>
+            <p class="text-lg font-bold text-indigo-600">Folder: <span id="current-deck-name"></span></p>
+        </div>
+
+        <!-- Top Controls: Add Card -->
+        <div class="w-full max-w-md mx-auto flex justify-center space-x-4 mb-8">
+            <button onclick="showAddCardModal()" class="flex-1 flex items-center justify-center space-x-2 px-4 py-2 bg-green-500 text-white font-semibold rounded-lg shadow-md hover:bg-green-600 transition transform active:scale-95">
+                <i data-lucide="plus" class="w-5 h-5"></i>
+                <span>Bulk Import Cards</span>
+            </button>
+        </div>
+        
+        <!-- Main Card Container (Static HTML Structure) -->
+        <div id="card-container" class="card-container mx-auto">
+            <div id="card-inner" class="card-inner" onclick="handleFlip()">
+                
+                <!-- Front Side (Question) -->
+                <div class="card-face card-face-front">
+                    <div class="w-full">
+                        <span id="card-index-front" class="text-sm font-medium text-indigo-500 mb-4 block"></span>
+                        <h2 id="card-question" class="text-xl font-semibold leading-relaxed">Tap to Flip</h2>
+                    </div>
                 </div>
-            </div>
+                
+                <!-- Back Side (Answer) -->
+                <div class="card-face card-face-back">
+                    <div class="w-full">
+                        <span class="text-sm font-light mb-2 block opacity-80">The Answer Is:</span>
+                        <p id="card-answer" class="text-2xl font-bold leading-relaxed"></p>
+                    </div>
+                </div>
 
-            <!-- View Containers -->
-            <div id="folder-list-view" class="view"></div>
-            <div id="card-list-view" class="view hidden"></div>
-            <div id="card-practice-view" class="view hidden"></div>
-            <div id="card-edit-view" class="view hidden"></div>
+            </div>
+        </div>
+
+        <!-- Navigation Controls -->
+        <div class="flex justify-center items-center space-x-4 w-full max-w-md mx-auto mt-8">
+            <button id="prev-btn" onclick="handlePrev()" class="p-3 bg-white text-indigo-600 rounded-full shadow-lg hover:bg-gray-100 transition duration-150 disabled:opacity-50 transform active:scale-95" aria-label="Previous Card">
+                <i data-lucide="chevron-left" class="w-6 h-6"></i>
+            </button>
+
+            <button id="flip-btn" onclick="handleFlip()" class="flex items-center space-x-2 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-full shadow-xl shadow-indigo-300 hover:bg-indigo-700 transition duration-150 transform active:scale-95">
+                <i data-lucide="rotate-ccw" class="w-5 h-5"></i>
+                <span id="flip-text">Flip to Answer</span>
+            </button>
+
+            <button id="next-btn" onclick="handleNext()" class="p-3 bg-white text-indigo-600 rounded-full shadow-lg hover:bg-gray-100 transition duration-150 disabled:opacity-50 transform active:scale-95" aria-label="Next Card">
+                <i data-lucide="chevron-right" class="w-6 h-6"></i>
+            </button>
+        </div>
+
+    </div>
+    
+    <!-- Status and Logging -->
+    <p id="card-status" class="mt-4 text-sm text-gray-600"></p>
+    <p id="auth-status" class="mt-2 text-xs text-gray-400"></p>
+
+    <!-- Modal for Bulk Adding Cards -->
+    <div id="add-card-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg p-6 transform transition-all duration-300 scale-95 opacity-0" id="modal-content-card">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Paste Questions for Bulk Import</h2>
+            
+            <p class="text-sm text-gray-500 mb-4">
+                <span class="font-bold text-red-500">IMPORTANT:</span> Use the format: <span class="font-mono text-indigo-600">1. Question - Answer. 2. Next Question - Next Answer.</span>
+            </p>
+
+            <form id="add-card-form" onsubmit="event.preventDefault(); parseAndSaveCards();">
+                <div class="mb-4">
+                    <label for="paste-input" class="block text-sm font-medium text-gray-700 mb-1">Paste your formatted questions here</label>
+                    <textarea id="paste-input" rows="8" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition placeholder-gray-400" placeholder="E.g., 1. Capital of Canada - Ottawa. 2. Chemical symbol for water - H2O."></textarea>
+                </div>
+                
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="hideAddCardModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">Import and Save Cards</button>
+                </div>
+            </form>
         </div>
     </div>
 
-    <!-- JavaScript logic -->
-    <script>
-        // DOM Elements
-        const app = document.getElementById('app');
-        const contentDiv = document.getElementById('content');
-        const loadingDiv = document.getElementById('loading');
-        const folderListView = document.getElementById('folder-list-view');
-        const cardListView = document.getElementById('card-list-view');
-        const cardPracticeView = document.getElementById('card-practice-view');
-        const cardEditView = document.getElementById('card-edit-view');
+    <!-- Modal for Creating New Deck -->
+    <div id="create-deck-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 transform transition-all duration-300 scale-95 opacity-0" id="modal-content-create">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Create New Folder</h2>
+            <form onsubmit="event.preventDefault(); createNewDeck();">
+                <div class="mb-6">
+                    <label for="new-deck-name-input" class="block text-sm font-medium text-gray-700 mb-1">Folder Name</label>
+                    <input type="text" id="new-deck-name-input" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="e.g., Biology Notes">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="hideCreateDeckModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">Create Folder</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
-        // Message Box Elements
-        const messageBoxModal = document.getElementById('message-box-modal');
-        const messageBoxTitle = document.getElementById('message-box-title');
-        const messageBoxBody = document.getElementById('message-box-body');
-        const messageBoxConfirm = document.getElementById('message-box-confirm');
-        const messageBoxCancel = document.getElementById('message-box-cancel');
+    <!-- Modal for Renaming Deck -->
+    <div id="rename-deck-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 transform transition-all duration-300 scale-95 opacity-0" id="modal-content-rename">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Rename Folder</h2>
+            <form onsubmit="event.preventDefault(); renameDeck();">
+                <div class="mb-6">
+                    <label for="rename-deck-name-input" class="block text-sm font-medium text-gray-700 mb-1">New Folder Name</label>
+                    <input type="text" id="rename-deck-name-input" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition" placeholder="Enter new name">
+                    <input type="hidden" id="rename-deck-id-hidden">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="hideRenameDeckModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>
+                    <button type="submit" class="px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">Rename</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
-        // Global State Variables
-        let currentView = 'folder-list';
-        let folders = [];
-        let cards = {}; // {folderId: [card1, card2, ...]}
-        let selectedFolderId = null;
-        let selectedCardIndex = 0;
+    <!-- Modal for Delete Confirmation -->
+    <div id="delete-confirm-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 transform transition-all duration-300 scale-95 opacity-0" id="modal-content-delete">
+            <h2 class="text-2xl font-bold mb-4 text-red-600 flex items-center">
+                <i data-lucide="alert-triangle" class="w-6 h-6 mr-2"></i>
+                Confirm Deletion
+            </h2>
+            <p class="text-gray-700 mb-6">Are you sure you want to delete the folder **<span id="deck-name-to-delete" class="font-bold"></span>**?</p>
+            <p class="text-sm text-red-500 mb-6">This action is permanent and will delete **all cards** inside this folder!</p>
+
+            <div class="flex justify-end space-x-3">
+                <button type="button" onclick="hideDeleteConfirmationModal()" class="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition">Cancel</button>
+                <button type="button" onclick="deleteDeck()" class="px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition">Yes, Delete Folder</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, setLogLevel, collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
-        // Storage Keys
-        const FOLDERS_KEY = 'flashcard_folders';
-        const CARDS_KEY = 'flashcard_cards';
+        // Expose Firebase objects and functions globally
+        window.db = null;
+        window.auth = null;
+        window.userId = null;
+        window.collection = collection;
+        window.query = query;
+        window.onSnapshot = onSnapshot;
+        window.addDoc = addDoc;
+        window.serverTimestamp = serverTimestamp;
+        window.appId = appId;
+        window.doc = doc;
+        window.updateDoc = updateDoc;
+        window.deleteDoc = deleteDoc;
+        window.getDocs = getDocs;
+
+        async function initApp() {
+            if (!firebaseConfig) {
+                console.error("Firebase configuration is missing.");
+                document.getElementById('auth-status').textContent = 'Error: Firebase config missing.';
+                window.startFlashcardApp();
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
+                setLogLevel('Debug'); 
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(window.auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(window.auth);
+                }
+
+                onAuthStateChanged(window.auth, (user) => {
+                    if (user) {
+                        window.userId = user.uid;
+                        document.getElementById('auth-status').textContent = `User ID: ${window.userId}`;
+                        console.log("Firebase authenticated. User ID:", user.uid);
+                    } else {
+                        window.userId = crypto.randomUUID();
+                        document.getElementById('auth-status').textContent = 'Signed in anonymously.';
+                        console.log("Signed in anonymously.");
+                    }
+                    window.startFlashcardApp(); // Start data loading after auth is settled
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization or authentication failed:", error);
+                document.getElementById('auth-status').textContent = `Auth Failed.`;
+                window.startFlashcardApp();
+            }
+        }
+
+        window.onload = initApp;
+    </script>
+
+    <!-- Application Logic -->
+    <script>
+        // --- Application State ---
+        let viewMode = 'decks'; // 'decks' or 'cards'
+        let currentDeck = { id: null, name: 'Loading...' }; // Selected Deck
+        let FLASHCARDS = []; // Populated by Card Listener
+        let cardIndex = 0;
+        let isFlipped = false;
+        
+        let cardUnsubscribe = null; // To manage the card listener subscription
+        let deckUnsubscribe = null; // To manage the deck listener subscription
+
+        // State for Long Press Detection and Deletion
+        let pressTimer = null;
+        const LONG_PRESS_DURATION = 500; // milliseconds
+        let deckToDelete = { id: null, name: null };
+
+        // --- Core View/Navigation Functions ---
+
+        function renderApp() {
+            lucide.createIcons();
+
+            const deckListView = document.getElementById('deck-list-view');
+            const cardViewerView = document.getElementById('card-viewer-view');
+            
+            // Clear any previous listeners
+            if (cardUnsubscribe) {
+                cardUnsubscribe();
+                cardUnsubscribe = null;
+            }
+            if (deckUnsubscribe) {
+                deckUnsubscribe();
+                deckUnsubscribe = null;
+            }
+
+            if (viewMode === 'decks') {
+                deckListView.classList.remove('hidden');
+                cardViewerView.classList.add('hidden');
+                setupDeckListener();
+            } else { // viewMode === 'cards'
+                deckListView.classList.add('hidden');
+                cardViewerView.classList.remove('hidden');
+                document.getElementById('current-deck-name').textContent = currentDeck.name;
+                setupCardListener(); 
+            }
+        }
+        
+        window.handleBackToDecks = function() {
+            viewMode = 'decks';
+            currentDeck = { id: null, name: 'Loading...' };
+            FLASHCARDS = [];
+            cardIndex = 0;
+            isFlipped = false;
+            document.getElementById('card-status').textContent = 'Switched to Folder View.';
+            renderApp();
+        };
+
+        window.handleSelectDeck = function(deckId, deckName) {
+            // Prevent selection if a long press was initiated (to prevent accidental card view)
+            if (pressTimer !== null) return;
+
+            currentDeck = { id: deckId, name: deckName };
+            viewMode = 'cards';
+            document.getElementById('card-status').textContent = `Loading cards for '${deckName}'...`;
+            renderApp();
+        };
+
+        // --- Card Viewer Functions ---
+        // (handleFlip, handleNext, handlePrev, renderCard are the same as before, ensuring card logic is solid)
+
+        window.handleFlip = function() {
+            if (FLASHCARDS.length === 0) return;
+            isFlipped = !isFlipped;
+            renderCard();
+        };
+
+        window.handleNext = function() {
+            if (FLASHCARDS.length === 0) return;
+            isFlipped = false; 
+            cardIndex = (cardIndex + 1) % FLASHCARDS.length;
+            renderCard();
+        };
+
+        window.handlePrev = function() {
+            if (FLASHCARDS.length === 0) return;
+            isFlipped = false; 
+            cardIndex = (cardIndex - 1 + FLASHCARDS.length) % FLASHCARDS.length;
+            renderCard();
+        };
+
+        function renderCard() {
+            const container = document.getElementById('card-container');
+            const questionEl = document.getElementById('card-question');
+            const answerEl = document.getElementById('card-answer');
+            const indexEl = document.getElementById('card-index-front');
+            const flipTextEl = document.getElementById('flip-text');
+            const statusEl = document.getElementById('card-status');
+            
+            const totalCards = FLASHCARDS.length;
+
+            if (totalCards === 0) {
+                questionEl.textContent = 'No cards in this folder.';
+                answerEl.textContent = 'Click "Bulk Import Cards" to begin!';
+                indexEl.textContent = '0 cards';
+                statusEl.textContent = 'Folder is empty.';
+            } else {
+                if (cardIndex >= totalCards) cardIndex = 0; 
+                
+                const currentCard = FLASHCARDS[cardIndex];
+                
+                questionEl.textContent = currentCard.question;
+                answerEl.textContent = currentCard.answer;
+                indexEl.textContent = `Question ${cardIndex + 1} of ${totalCards}`;
+                statusEl.textContent = `Viewing Card ${cardIndex + 1} of ${totalCards} in ${currentDeck.name}.`;
+            }
+
+            if (isFlipped) {
+                container.classList.add('is-flipped');
+                flipTextEl.textContent = 'Show Question';
+            } else {
+                container.classList.remove('is-flipped');
+                flipTextEl.textContent = 'Flip to Answer';
+            }
+
+            lucide.createIcons();
+        }
+
+
+        // --- Firestore Deck Management (Deck List and Long Press Delete) ---
 
         /**
-         * Custom Promise-based Message Box (replaces alert/confirm)
-         * @param {string} title - The title of the box.
-         * @param {string} body - The main message body.
-         * @param {boolean} isConfirmation - If true, shows a Cancel button.
-         * @returns {Promise<boolean>} - Resolves true for Confirm/OK, false for Cancel.
+         * Cleans up the long press timer on mouseup or touchend.
+         * If a long press was detected, it shows the delete modal.
          */
-        function showMessageBox(title, body, isConfirmation = false) {
-            return new Promise(resolve => {
-                messageBoxTitle.textContent = title;
-                messageBoxBody.textContent = body;
-                messageBoxCancel.classList.toggle('hidden', !isConfirmation);
+        window.handleEndPress = function(deckId, deckName) {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+            // Note: handleSelectDeck prevents selection if pressTimer != null
 
-                const handleConfirm = () => {
-                    messageBoxModal.classList.add('hidden');
-                    messageBoxConfirm.removeEventListener('click', handleConfirm);
-                    messageBoxCancel.removeEventListener('click', handleCancel);
-                    resolve(true);
-                };
+            // If the modal is already open, don't try to open it again.
+            if (deckToDelete.id === deckId) {
+                showDeleteConfirmationModal(deckId, deckName);
+            }
+        };
 
-                const handleCancel = () => {
-                    messageBoxModal.classList.add('hidden');
-                    messageBoxConfirm.removeEventListener('click', handleConfirm);
-                    messageBoxCancel.removeEventListener('click', handleCancel);
-                    resolve(false);
-                };
+        /**
+         * Starts the long press timer on mousedown or touchstart.
+         */
+        window.handleStartPress = function(deckId, deckName) {
+            pressTimer = setTimeout(() => {
+                // Timer finished, long press detected.
+                deckToDelete = { id: deckId, name: deckName };
+                // Set the name in the modal content immediately
+                document.getElementById('deck-name-to-delete').textContent = deckName;
+                
+                // Show the modal after a delay to ensure the user knows it was the long press that triggered it
+                showDeleteConfirmationModal();
+            }, LONG_PRESS_DURATION);
+        };
 
-                messageBoxConfirm.addEventListener('click', handleConfirm);
-                if (isConfirmation) {
-                    messageBoxCancel.addEventListener('click', handleCancel);
+
+        function setupDeckListener() {
+            if (!window.db || !window.userId) return;
+
+            const decksRef = collection(window.db, `artifacts/${window.appId}/users/${window.userId}/decks`);
+            const q = query(decksRef);
+
+            deckUnsubscribe = onSnapshot(q, (snapshot) => {
+                const deckListContainer = document.getElementById('deck-list-container');
+                deckListContainer.innerHTML = '';
+                const decks = [];
+                snapshot.forEach((doc) => {
+                    decks.push({ id: doc.id, ...doc.data() });
+                });
+
+                if (decks.length === 0) {
+                    deckListContainer.innerHTML = `
+                        <div class="text-center p-8 bg-white rounded-xl shadow-inner border border-dashed border-gray-300">
+                            <i data-lucide="folder-x" class="w-8 h-8 text-indigo-500 mx-auto mb-2"></i>
+                            <p class="text-lg font-semibold text-gray-700">No folders found.</p>
+                            <p class="text-sm text-gray-500">Click 'Create New Folder' to get started!</p>
+                        </div>
+                    `;
+                } else {
+                    decks.forEach(deck => {
+                        const deckItem = document.createElement('div');
+                        deckItem.className = 'bg-white p-4 rounded-xl shadow-lg flex justify-between items-center transition hover:shadow-xl long-press-target';
+                        deckItem.id = `deck-${deck.id}`;
+                        
+                        // Set up event listeners for long press and selection
+                        deckItem.setAttribute('onmousedown', `handleStartPress('${deck.id}', '${deck.name}')`);
+                        deckItem.setAttribute('onmouseup', `handleEndPress('${deck.id}', '${deck.name}')`);
+                        deckItem.setAttribute('onmouseleave', `clearTimeout(pressTimer); pressTimer = null;`); // Cancel if mouse leaves
+                        
+                        deckItem.setAttribute('ontouchstart', `handleStartPress('${deck.id}', '${deck.name}')`);
+                        deckItem.setAttribute('ontouchend', `handleEndPress('${deck.id}', '${deck.name}')`);
+
+                        deckItem.innerHTML = `
+                            <div class="flex items-center space-x-4 cursor-pointer" onclick="handleSelectDeck('${deck.id}', '${deck.name}')">
+                                <i data-lucide="folder" class="w-6 h-6 text-indigo-500"></i>
+                                <span class="text-xl font-semibold text-gray-800">${deck.name}</span>
+                            </div>
+                            <div class="space-x-2">
+                                <button onclick="handleRenameDeckClick('${deck.id}', '${deck.name}')" class="p-2 text-gray-500 hover:text-indigo-600 transition" title="Rename Folder">
+                                    <i data-lucide="pencil" class="w-5 h-5"></i>
+                                </button>
+                                <button onclick="handleSelectDeck('${deck.id}', '${deck.name}')" class="px-3 py-1 bg-green-500 text-white text-sm font-medium rounded-lg hover:bg-green-600 transition transform active:scale-95">
+                                    Select
+                                </button>
+                            </div>
+                        `;
+                        deckListContainer.appendChild(deckItem);
+                    });
                 }
-
-                messageBoxModal.classList.remove('hidden');
+                lucide.createIcons();
+            }, (error) => {
+                console.error("Error listening to Decks:", error);
+                document.getElementById('deck-loading-status').textContent = 'Error loading folders.';
             });
         }
-
-        // --- Utility Functions ---
-
-        function generateUniqueId() {
-            return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
-        }
         
-        // Data Handling - Using localStorage as fallback for GitHub Pages
-        const storage = {
-            async get(key) {
-                try {
-                    const data = localStorage.getItem(key);
-                    return data ? JSON.parse(data) : null;
-                } catch (e) {
-                    console.error("Error reading from localStorage:", e);
-                    return null;
-                }
-            },
-            async set(key, value) {
-                try {
-                    localStorage.setItem(key, JSON.stringify(value));
-                } catch (e) {
-                    console.error("Error writing to localStorage:", e);
-                }
+        /**
+         * Deletes the deck document AND all nested card documents.
+         */
+        window.deleteDeck = async function() {
+            if (!deckToDelete.id) return;
+            const deckId = deckToDelete.id;
+            const deckName = deckToDelete.name;
+            hideDeleteConfirmationModal();
+
+            try {
+                document.getElementById('card-status').textContent = `Deleting folder '${deckName}' and all its cards...`;
+                
+                // 1. Delete all nested cards (subcollection cleanup)
+                const cardsRef = collection(window.db, `artifacts/${window.appId}/users/${window.userId}/decks/${deckId}/cards`);
+                const snapshot = await getDocs(cardsRef);
+                const deleteCardPromises = [];
+                
+                snapshot.forEach((cardDoc) => {
+                    deleteCardPromises.push(deleteDoc(doc(cardsRef, cardDoc.id)));
+                });
+                
+                await Promise.all(deleteCardPromises);
+
+                // 2. Delete the parent deck document
+                const deckDocRef = doc(window.db, `artifacts/${window.appId}/users/${window.userId}/decks`, deckId);
+                await deleteDoc(deckDocRef);
+
+                document.getElementById('card-status').textContent = `Folder '${deckName}' deleted successfully.`;
+                deckToDelete = { id: null, name: null };
+
+            } catch (error) {
+                console.error("Error deleting deck:", error);
+                document.getElementById('card-status').textContent = `CRITICAL DELETE ERROR: Failed to delete folder '${deckName}'.`;
             }
         };
 
 
-        async function loadData() {
+        window.createNewDeck = async function() {
+            const name = document.getElementById('new-deck-name-input').value.trim();
+            if (!name) return;
+
             try {
-                // Initialize global state from storage
-                folders = (await storage.get(FOLDERS_KEY)) || [];
-                cards = (await storage.get(CARDS_KEY)) || {};
-                console.log("Data loaded.", {folders, cards});
+                const decksRef = collection(window.db, `artifacts/${window.appId}/users/${window.userId}/decks`);
+                const newDeckRef = await addDoc(decksRef, {
+                    name: name,
+                    createdAt: serverTimestamp()
+                });
+
+                hideCreateDeckModal();
+                document.getElementById('card-status').textContent = `Folder '${name}' created successfully.`;
+                
+                // Automatically select the new deck
+                handleSelectDeck(newDeckRef.id, name);
+
             } catch (error) {
-                console.error("Failed to load initial data:", error);
-                showMessageBox("Data Load Error", "Could not load data from storage. Starting fresh.");
+                console.error("Error creating deck:", error);
+                document.getElementById('card-status').textContent = 'Error creating folder.';
             }
-        }
-
-        async function saveData() {
-            try {
-                await storage.set(FOLDERS_KEY, folders);
-                await storage.set(CARDS_KEY, cards);
-            } catch (error) {
-                console.error("Failed to save data:", error);
-                showMessageBox("Data Save Error", "Could not save data to storage.");
-            }
-        }
-
-        // --- View Navigation ---
-
-        function setView(viewName) {
-            folderListView.classList.add('hidden');
-            cardListView.classList.add('hidden');
-            cardPracticeView.classList.add('hidden');
-            cardEditView.classList.add('hidden');
-
-            switch (viewName) {
-                case 'folder-list':
-                    folderListView.classList.remove('hidden');
-                    renderFolderList();
-                    break;
-                case 'card-list':
-                    cardListView.classList.remove('hidden');
-                    renderCardList();
-                    break;
-                case 'practice':
-                    cardPracticeView.classList.remove('hidden');
-                    renderCardPractice();
-                    break;
-                case 'edit':
-                    cardEditView.classList.remove('hidden');
-                    renderCardEdit();
-                    break;
-                default:
-                    console.error("Unknown view:", viewName);
-            }
-            currentView = viewName;
-        }
-
-        // --- Folder List View (Home Screen) ---
-
-        function createFolderItem(folder) {
-            const cardCount = (cards[folder.id] || []).length;
-            
-            const folderDiv = document.createElement('div');
-            folderDiv.className = 'flex justify-between items-center bg-gray-800 p-4 rounded-xl mb-3 card-shadow cursor-pointer transition transform hover:scale-[1.01]';
-            
-            const textDiv = document.createElement('div');
-            textDiv.className = 'flex-grow min-w-0';
-            textDiv.innerHTML = `
-                <h2 class="text-lg font-semibold text-white truncate">${folder.name}</h2>
-                <p class="text-sm text-gray-400">${cardCount} ${cardCount === 1 ? 'Card' : 'Cards'}</p>
-            `;
-            textDiv.onclick = () => {
-                selectedFolderId = folder.id;
-                setView('card-list');
-            };
-            
-            const buttonContainer = document.createElement('div');
-            buttonContainer.className = 'flex space-x-2 ml-4 flex-shrink-0';
-            
-            // Edit Button
-            const editBtn = document.createElement('button');
-            editBtn.className = 'p-2 rounded-full text-blue-400 hover:bg-gray-700 transition focus-ring-white';
-            editBtn.innerHTML = `
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-            `;
-            editBtn.onclick = async (e) => {
-                e.stopPropagation();
-                
-                // Prompting for new name using a custom prompt/alert since prompt() is banned
-                const newName = await new Promise(resolve => {
-                    messageBoxTitle.textContent = 'Edit Folder Name';
-                    messageBoxBody.innerHTML = `
-                        <p class="text-gray-300 mb-2">Enter a new name for the folder:</p>
-                        <input id="prompt-input" type="text" value="${folder.name}" class="w-full p-2 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500" />
-                    `;
-                    messageBoxCancel.classList.remove('hidden');
-
-                    const handleConfirm = () => {
-                        const input = document.getElementById('prompt-input').value.trim();
-                        messageBoxModal.classList.add('hidden');
-                        messageBoxConfirm.removeEventListener('click', handleConfirm);
-                        messageBoxCancel.removeEventListener('click', handleCancel);
-                        resolve(input);
-                    };
-
-                    const handleCancel = () => {
-                        messageBoxModal.classList.add('hidden');
-                        messageBoxConfirm.removeEventListener('click', handleConfirm);
-                        messageBoxCancel.removeEventListener('click', handleCancel);
-                        resolve(null);
-                    };
-
-                    messageBoxConfirm.textContent = 'Confirm';
-                    messageBoxCancel.textContent = 'Cancel';
-                    messageBoxConfirm.addEventListener('click', handleConfirm);
-                    messageBoxCancel.addEventListener('click', handleCancel);
-                    messageBoxModal.classList.remove('hidden');
-                });
-                
-                if (newName && newName.length > 0) {
-                    folder.name = newName;
-                    await saveData();
-                    renderFolderList();
-                } else if (newName !== null) {
-                    // User confirmed but entered nothing.
-                    showMessageBox("Name Required", "Folder name cannot be empty.");
-                }
-            };
-            
-            // Delete Button
-            const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'p-2 rounded-full text-red-400 hover:bg-gray-700 transition focus-ring-white';
-            deleteBtn.innerHTML = `
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-            `;
-            deleteBtn.onclick = async (e) => {
-                e.stopPropagation();
-                const confirmed = await showMessageBox('Confirm Delete', `Are you sure you want to delete the folder "${folder.name}" and all ${cardCount} cards?`, true);
-                if (confirmed) {
-                    folders = folders.filter(f => f.id !== folder.id);
-                    delete cards[folder.id];
-                    await saveData();
-                    renderFolderList();
-                }
-            };
-
-            buttonContainer.appendChild(editBtn);
-            buttonContainer.appendChild(deleteBtn);
-            
-            folderDiv.appendChild(textDiv);
-            folderDiv.appendChild(buttonContainer);
-            
-            return folderDiv;
-        }
-
-        function renderFolderList() {
-            folderListView.innerHTML = `
-                <div class="mb-6">
-                    <h2 class="text-2xl font-bold mb-3 text-white">Your Folders</h2>
-                    <div id="folder-container"></div>
-                    <p id="no-folders-msg" class="text-center text-gray-500 mt-8 hidden">
-                        No folders yet. Tap the button below to create your first one!
-                    </p>
-                </div>
-                <button id="add-folder-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
-                    + Create New Folder
-                </button>
-            `;
-
-            const folderContainer = document.getElementById('folder-container');
-            const noFoldersMsg = document.getElementById('no-folders-msg');
-
-            if (folders.length === 0) {
-                noFoldersMsg.classList.remove('hidden');
-            } else {
-                folders.forEach(folder => {
-                    folderContainer.appendChild(createFolderItem(folder));
-                });
-            }
-
-            document.getElementById('add-folder-btn').onclick = async () => {
-                // Prompting for new name using a custom prompt/alert since prompt() is banned
-                const folderName = await new Promise(resolve => {
-                    messageBoxTitle.textContent = 'New Folder';
-                    messageBoxBody.innerHTML = `
-                        <p class="text-gray-300 mb-2">Enter a name for your new folder:</p>
-                        <input id="prompt-input" type="text" placeholder="Folder Name" class="w-full p-2 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500" />
-                    `;
-                    messageBoxCancel.classList.remove('hidden');
-                    
-                    const handleConfirm = () => {
-                        const input = document.getElementById('prompt-input').value.trim();
-                        messageBoxModal.classList.add('hidden');
-                        messageBoxConfirm.removeEventListener('click', handleConfirm);
-                        messageBoxCancel.removeEventListener('click', handleCancel);
-                        resolve(input);
-                    };
-
-                    const handleCancel = () => {
-                        messageBoxModal.classList.add('hidden');
-                        messageBoxConfirm.removeEventListener('click', handleConfirm);
-                        messageBoxCancel.removeEventListener('click', handleCancel);
-                        resolve(null);
-                    };
-
-                    messageBoxConfirm.textContent = 'Confirm';
-                    messageBoxCancel.textContent = 'Cancel';
-                    messageBoxConfirm.addEventListener('click', handleConfirm);
-                    messageBoxCancel.addEventListener('click', handleCancel);
-                    messageBoxModal.classList.remove('hidden');
-                });
-                
-                if (folderName && folderName.length > 0) {
-                    const newFolder = { id: generateUniqueId(), name: folderName };
-                    folders.push(newFolder);
-                    cards[newFolder.id] = [];
-                    await saveData();
-                    renderFolderList();
-                } else if (folderName !== null) {
-                    // User confirmed but entered nothing.
-                    showMessageBox("Name Required", "Folder name cannot be empty.");
-                }
-            };
-        }
+        };
         
-        // --- Card List View ---
+        window.handleRenameDeckClick = function(id, name) {
+            document.getElementById('rename-deck-id-hidden').value = id;
+            document.getElementById('rename-deck-name-input').value = name;
+            showRenameDeckModal();
+        };
 
-        function createCardListItem(card, index) {
-            const li = document.createElement('li');
-            li.className = 'flex justify-between items-center bg-gray-700 p-3 rounded-lg mb-2 card-shadow';
-            li.innerHTML = `
-                <span class="text-white text-base truncate flex-grow">${index + 1}. ${card.question}</span>
-                <div class="flex space-x-2 ml-4 flex-shrink-0">
-                    <button data-action="edit" class="p-1 rounded-full text-yellow-300 hover:bg-gray-600 transition focus-ring-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
-                    </button>
-                    <button data-action="delete" class="p-1 rounded-full text-red-400 hover:bg-gray-600 transition focus-ring-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
-                    </button>
-                </div>
-            `;
+        window.renameDeck = async function() {
+            const id = document.getElementById('rename-deck-id-hidden').value;
+            const newName = document.getElementById('rename-deck-name-input').value.trim();
+            if (!newName || !id) return;
 
-            li.querySelector('[data-action="edit"]').onclick = () => {
-                selectedCardIndex = index;
-                setView('edit');
-            };
-
-            li.querySelector('[data-action="delete"]').onclick = async () => {
-                const confirmed = await showMessageBox('Confirm Delete', 'Are you sure you want to delete this card?', true);
-                if (confirmed) {
-                    cards[selectedFolderId].splice(index, 1);
-                    await saveData();
-                    renderCardList();
-                }
-            };
-            
-            return li;
-        }
-
-        function renderCardList() {
-            const folder = folders.find(f => f.id === selectedFolderId);
-            const folderCards = cards[selectedFolderId] || [];
-            const cardCount = folderCards.length;
-            
-            if (!folder) {
-                return setView('folder-list');
-            }
-
-            cardListView.innerHTML = `
-                <button id="back-to-folders" class="mb-4 text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                    Back to Folders
-                </button>
-                <h2 class="text-3xl font-extrabold text-white mb-2 truncate">${folder.name}</h2>
-                <p class="text-gray-400 mb-6">${cardCount} ${cardCount === 1 ? 'Card' : 'Cards'}</p>
-
-                <div class="flex space-x-4 mb-6">
-                    <button id="add-card-btn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
-                        + Add Card
-                    </button>
-                    <button id="practice-btn" ${cardCount === 0 ? 'disabled' : ''} class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
-                        Start Practice
-                    </button>
-                </div>
-                
-                <ul id="card-list" class="space-y-2">
-                    <!-- Card items go here -->
-                </ul>
-                <p id="no-cards-msg" class="text-center text-gray-500 mt-8 hidden">
-                    No cards in this folder yet.
-                </p>
-            `;
-
-            document.getElementById('back-to-folders').onclick = () => setView('folder-list');
-            document.getElementById('add-card-btn').onclick = () => {
-                selectedCardIndex = -1; // -1 indicates a new card
-                setView('edit');
-            };
-            document.getElementById('practice-btn').onclick = () => {
-                if (cardCount > 0) {
-                    selectedCardIndex = 0;
-                    setView('practice');
-                }
-            };
-
-            const cardListUl = document.getElementById('card-list');
-            const noCardsMsg = document.getElementById('no-cards-msg');
-
-            if (cardCount === 0) {
-                noCardsMsg.classList.remove('hidden');
-            } else {
-                folderCards.forEach((card, index) => {
-                    cardListUl.appendChild(createCardListItem(card, index));
-                });
-            }
-        }
-
-        // --- Card Edit View ---
-
-        function renderCardEdit() {
-            const folderCards = cards[selectedFolderId] || [];
-            const isNewCard = selectedCardIndex === -1;
-            let card = isNewCard ? { question: '', answer: '' } : folderCards[selectedCardIndex];
-
-            const title = isNewCard ? 'Add New Card' : 'Edit Card';
-
-            cardEditView.innerHTML = `
-                <button id="back-to-cards" class="mb-4 text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                    Back to Card List
-                </button>
-
-                <h2 class="text-3xl font-extrabold text-white mb-6">${title}</h2>
-
-                <form id="card-edit-form" class="space-y-6">
-                    <div>
-                        <label for="question" class="block text-sm font-medium text-gray-400 mb-1">Question</label>
-                        <textarea id="question" rows="4" class="w-full p-3 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500 resize-none card-shadow" required>${card.question}</textarea>
-                    </div>
-                    <div>
-                        <label for="answer" class="block text-sm font-medium text-gray-400 mb-1">Answer</label>
-                        <textarea id="answer" rows="4" class="w-full p-3 rounded-lg bg-gray-700 text-white border-none focus:ring-blue-500 focus:border-blue-500 resize-none card-shadow" required>${card.answer}</textarea>
-                    </div>
-                    
-                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
-                        ${isNewCard ? 'Save Card' : 'Update Card'}
-                    </button>
-                </form>
-            `;
-
-            document.getElementById('back-to-cards').onclick = () => setView('card-list');
-            
-            document.getElementById('card-edit-form').onsubmit = async (e) => {
-                e.preventDefault();
-                const question = document.getElementById('question').value.trim();
-                const answer = document.getElementById('answer').value.trim();
-
-                if (!question || !answer) {
-                    return showMessageBox("Missing Content", "Both the Question and Answer fields are required.");
-                }
-
-                if (isNewCard) {
-                    cards[selectedFolderId].push({ question, answer });
-                    showMessageBox("Success", "Card saved successfully!");
-                } else {
-                    folderCards[selectedCardIndex] = { question, answer };
-                    showMessageBox("Success", "Card updated successfully!");
-                }
-                
-                await saveData();
-                setView('card-list');
-            };
-        }
-
-        // --- Card Practice View ---
-
-        function renderCardPractice() {
-            const folderCards = cards[selectedFolderId] || [];
-            
-            if (folderCards.length === 0) {
-                return setView('card-list');
-            }
-
-            const currentCard = folderCards[selectedCardIndex];
-            const totalCards = folderCards.length;
-            
-            cardPracticeView.innerHTML = `
-                <div class="flex justify-between items-center mb-6">
-                    <button id="back-to-cards" class="text-blue-400 hover:text-blue-300 font-semibold flex items-center transition focus-ring-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        Exit Practice
-                    </button>
-                    <span id="card-counter" class="text-lg font-bold text-yellow-400">${selectedCardIndex + 1} / ${totalCards}</span>
-                </div>
-
-                <!-- Flashcard Display -->
-                <!-- Removed inline ontouchstart to standardize event handling -->
-                <div id="flashcard" class="h-96 perspective [perspective:1000px] mb-8">
-                    <div id="card-container" class="card-container relative w-full h-full">
-                        <!-- Card Front (Question) -->
-                        <div id="card-front" class="flashcard-front absolute w-full h-full bg-gray-800 rounded-2xl card-shadow p-6 flex flex-col items-center justify-center text-center cursor-pointer transition transform hover:scale-[1.01] focus-ring-white">
-                            <p class="text-sm text-gray-400 mb-2 font-medium">QUESTION</p>
-                            <div class="text-2xl font-extrabold text-white overflow-y-auto max-h-full">${currentCard.question}</div>
-                        </div>
-                        <!-- Card Back (Answer) -->
-                        <div id="card-back" class="flashcard-back absolute w-full h-full bg-blue-800 rounded-2xl card-shadow p-6 flex flex-col items-center justify-center text-center cursor-pointer transition transform hover:scale-[1.01] focus-ring-white">
-                            <p class="text-sm text-blue-300 mb-2 font-medium">ANSWER</p>
-                            <div class="text-2xl font-extrabold text-white overflow-y-auto max-h-full">${currentCard.answer}</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Practice Controls -->
-                <div class="flex justify-between space-x-4">
-                    <button id="prev-card-btn" ${selectedCardIndex === 0 ? 'disabled' : ''} class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
-                    </button>
-                    <button id="flip-card-btn" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] focus-ring-white">
-                        Flip
-                    </button>
-                    <button id="next-card-btn" ${selectedCardIndex === totalCards - 1 ? 'disabled' : ''} class="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-semibold py-3 px-4 rounded-xl shadow-lg transition transform hover:scale-[1.01] disabled:opacity-50 focus-ring-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
-                    </button>
-                </div>
-
-                <div class="mt-4 text-center text-gray-500 text-sm">Tap the card or use the Flip button</div>
-            `;
-
-            const cardContainer = document.getElementById('card-container');
-            const flashcardDiv = document.getElementById('flashcard');
-
-            // Toggle card flip on tap
-            const flipCard = () => {
-                // This toggles the 'flip-card' class on the container, which the CSS now correctly targets.
-                cardContainer.classList.toggle('flip-card');
-            };
-
-            document.getElementById('flip-card-btn').onclick = flipCard;
-            cardContainer.onclick = flipCard;
-
-            // Navigation
-            document.getElementById('back-to-cards').onclick = () => setView('card-list');
-            
-            document.getElementById('prev-card-btn').onclick = () => {
-                selectedCardIndex = Math.max(0, selectedCardIndex - 1);
-                renderCardPractice();
-            };
-
-            document.getElementById('next-card-btn').onclick = () => {
-                selectedCardIndex = Math.min(totalCards - 1, selectedCardIndex + 1);
-                renderCardPractice();
-            };
-
-            // Mobile Swipe/Touch Controls (for easier mobile use)
-            let touchstartX = 0;
-            let touchendX = 0;
-
-            const checkDirection = () => {
-                // If it's a small movement (a tap), don't navigate
-                if (Math.abs(touchendX - touchstartX) < 50) {
-                    return;
-                }
-
-                if (touchendX < touchstartX) { // Swipe Left (Next Card)
-                    if (selectedCardIndex < totalCards - 1) {
-                        selectedCardIndex++;
-                        renderCardPractice();
-                    }
-                } else if (touchendX > touchstartX) { // Swipe Right (Previous Card)
-                    if (selectedCardIndex > 0) {
-                        selectedCardIndex--;
-                        renderCardPractice();
-                    }
-                }
-            };
-            
-            flashcardDiv.addEventListener('touchstart', e => {
-                touchstartX = e.changedTouches[0].screenX;
-            });
-
-            flashcardDiv.addEventListener('touchend', e => {
-                touchendX = e.changedTouches[0].screenX;
-                checkDirection();
-            });
-
-        }
-
-
-        // --- Initialization ---
-
-        async function initApp() {
             try {
-                // Show loading screen
-                loadingDiv.classList.remove('hidden');
+                const deckDocRef = doc(window.db, `artifacts/${window.appId}/users/${window.userId}/decks`, id);
+                await updateDoc(deckDocRef, {
+                    name: newName,
+                    updatedAt: serverTimestamp()
+                });
                 
-                // 1. Load data from storage
-                await loadData();
+                // If the current view is the card viewer and this is the current deck, update the name
+                if (viewMode === 'cards' && currentDeck.id === id) {
+                    currentDeck.name = newName;
+                    document.getElementById('current-deck-name').textContent = newName;
+                }
 
-                // 2. Hide loading screen and show the default view
-                loadingDiv.classList.add('hidden');
-                setView('folder-list');
+                hideRenameDeckModal();
+                document.getElementById('card-status').textContent = `Folder renamed to '${newName}'.`;
 
             } catch (error) {
-                console.error("App initialization failed:", error);
-                loadingDiv.innerHTML = `<p class="text-red-500">Failed to initialize app. See console for details.</p>`;
+                console.error("Error renaming deck:", error);
+                document.getElementById('card-status').textContent = 'Error renaming folder.';
             }
+        };
+
+
+        // --- Card Listener and Bulk Import (Same as before) ---
+
+        function setupCardListener() {
+            if (!window.db || !window.userId || !currentDeck.id) return;
+
+            // Path: /artifacts/{appId}/users/{userId}/decks/{deckId}/cards
+            const cardsRef = collection(window.db, `artifacts/${window.appId}/users/${window.userId}/decks/${currentDeck.id}/cards`);
+            const q = query(cardsRef);
+
+            // Set up new listener and save the unsubscribe function
+            cardUnsubscribe = onSnapshot(q, (snapshot) => {
+                const newCards = [];
+                snapshot.forEach((doc) => {
+                    newCards.push({ id: doc.id, ...doc.data() });
+                });
+                
+                newCards.sort((a, b) => (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0));
+
+                FLASHCARDS = newCards;
+                
+                if (cardIndex >= FLASHCARDS.length) {
+                    cardIndex = Math.max(0, FLASHCARDS.length - 1);
+                }
+
+                isFlipped = false; 
+                renderCard();
+                console.log(`Cards loaded for ${currentDeck.name}. Total:`, FLASHCARDS.length);
+            }, (error) => {
+                console.error("Error listening to Cards:", error);
+                document.getElementById('card-status').textContent = 'Error loading cards for this folder.';
+            });
         }
 
-        // Start the application when the window loads
-        window.onload = initApp;
+        window.parseAndSaveCards = async function() {
+            const pastedText = document.getElementById('paste-input').value.trim();
+            document.getElementById('paste-input').value = ''; 
+            
+            if (!pastedText) {
+                document.getElementById('card-status').textContent = 'Paste input cannot be empty.';
+                return;
+            }
+            if (!currentDeck.id) {
+                 document.getElementById('card-status').textContent = 'Error: No folder selected to save cards.';
+                return;
+            }
+
+            const regex = /(\d+)\.?\s*([\s\S]*?)\s*-\s*([\s\S]*?)\s*\./g;
+            const matches = [...pastedText.matchAll(regex)];
+
+            if (matches.length === 0) {
+                document.getElementById('card-status').textContent = 'Parsing failed: Check your format (1. Q - A.) and try again.';
+                hideAddCardModal();
+                return;
+            }
+
+            const cardsToSave = [];
+            matches.forEach(match => {
+                const question = match[2].trim();
+                const answer = match[3].trim();
+                
+                if (question.length > 0 && answer.length > 0) {
+                    cardsToSave.push({ question, answer });
+                }
+            });
+            
+            if (cardsToSave.length === 0) {
+                document.getElementById('card-status').textContent = 'Parsing successful, but no valid Q/A pairs found to save.';
+                hideAddCardModal();
+                return;
+            }
+
+            try {
+                const cardsRef = collection(window.db, `artifacts/${window.appId}/users/${window.userId}/decks/${currentDeck.id}/cards`);
+                
+                const savePromises = cardsToSave.map(card => 
+                    addDoc(cardsRef, {
+                        question: card.question,
+                        answer: card.answer,
+                        createdAt: serverTimestamp()
+                    })
+                );
+
+                await Promise.all(savePromises);
+
+                hideAddCardModal();
+                document.getElementById('card-status').textContent = `Success! ${cardsToSave.length} cards saved and loaded into ${currentDeck.name}.`;
+            } catch (error) {
+                console.error("Error saving documents:", error);
+                document.getElementById('card-status').textContent = `CRITICAL SAVE ERROR: Failed to save cards.`;
+            }
+        };
+
+        // --- Modal Control Functions ---
+        
+        // Add Card Modal
+        const cardModal = document.getElementById('add-card-modal');
+        const cardModalContent = document.getElementById('modal-content-card');
+        const pasteInput = document.getElementById('paste-input');
+        window.showAddCardModal = function() {
+            pasteInput.value = ''; 
+            cardModal.classList.remove('hidden'); cardModal.classList.add('flex');
+            setTimeout(() => { cardModalContent.classList.remove('scale-95', 'opacity-0'); cardModalContent.classList.add('scale-100', 'opacity-100'); pasteInput.focus(); }, 10);
+        };
+        window.hideAddCardModal = function() {
+            cardModalContent.classList.remove('scale-100', 'opacity-100'); cardModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { cardModal.classList.remove('flex'); cardModal.classList.add('hidden'); }, 300);
+        };
+
+        // Create Deck Modal
+        const createModal = document.getElementById('create-deck-modal');
+        const createModalContent = document.getElementById('modal-content-create');
+        const newDeckInput = document.getElementById('new-deck-name-input');
+        window.showCreateDeckModal = function() {
+            newDeckInput.value = '';
+            createModal.classList.remove('hidden'); createModal.classList.add('flex');
+            setTimeout(() => { createModalContent.classList.remove('scale-95', 'opacity-0'); createModalContent.classList.add('scale-100', 'opacity-100'); newDeckInput.focus(); }, 10);
+        };
+        window.hideCreateDeckModal = function() {
+            createModalContent.classList.remove('scale-100', 'opacity-100'); createModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { createModal.classList.remove('flex'); createModal.classList.add('hidden'); }, 300);
+        };
+
+        // Rename Deck Modal
+        const renameModal = document.getElementById('rename-deck-modal');
+        const renameModalContent = document.getElementById('modal-content-rename');
+        const renameDeckInput = document.getElementById('rename-deck-name-input');
+        window.showRenameDeckModal = function() {
+            renameModal.classList.remove('hidden'); renameModal.classList.add('flex');
+            setTimeout(() => { renameModalContent.classList.remove('scale-95', 'opacity-0'); renameModalContent.classList.add('scale-100', 'opacity-100'); renameDeckInput.focus(); }, 10);
+        };
+        window.hideRenameDeckModal = function() {
+            renameModalContent.classList.remove('scale-100', 'opacity-100'); renameModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { renameModal.classList.remove('flex'); renameModal.classList.add('hidden'); }, 300);
+        };
+        
+        // Delete Confirmation Modal
+        const deleteModal = document.getElementById('delete-confirm-modal');
+        const deleteModalContent = document.getElementById('modal-content-delete');
+        window.showDeleteConfirmationModal = function() {
+            deleteModal.classList.remove('hidden'); deleteModal.classList.add('flex');
+            setTimeout(() => { deleteModalContent.classList.remove('scale-95', 'opacity-0'); deleteModalContent.classList.add('scale-100', 'opacity-100'); }, 10);
+        };
+        window.hideDeleteConfirmationModal = function() {
+            deckToDelete = { id: null, name: null }; // Reset deletion state
+            deleteModalContent.classList.remove('scale-100', 'opacity-100'); deleteModalContent.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => { deleteModal.classList.remove('flex'); deleteModal.classList.add('hidden'); }, 300);
+        };
+
+
+        // --- Entry Point ---
+        window.startFlashcardApp = function() {
+            renderApp();
+        };
 
     </script>
 </body>
 </html>
 
+                   
